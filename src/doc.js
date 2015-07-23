@@ -18,52 +18,53 @@ function getAllDocComments(reader) {
         lastPos,
         token = reader.readTo("///", "/**");
 
+    // 提取所有注释原始信息。
     while (token) {
 
         if (token.content === "///") {
             reader.readTo("\n");
-            docComment = {
-                type: token.content,
-                line: token.line,
-                col: token.col,
-                indent: token.indent,
-                content: reader.source.substring(token.pos, reader.pos)
-            };
-
-            // 读取剩下的同行 /// 。
-            token = reader.readTo("///");
-
-            if (docComment && docComment.type === "///" && docComment.line + 1 == token.line) {
-                docComment.content += reader.source.substring(token.pos, reader.pos)
-            } else {
-                
-            }
+            hasSingleLineComments = true;
         } else {
             reader.readTo("*/");
-            docComment = {
-                type: token.content,
-                line: token.line,
-                col: token.col,
-                indent: token.indent,
-                content: reader.source.substring(token.pos, reader.pos)
-            };
         }
 
-        // 处理紧跟的代码文本以方便提取信息。
-        lastPos = reader.pos;
-        token = reader.readTo("///", "/**", "\n");
-        docComment.rest = reader.source.substring(lastPos, (token || reader).pos);
-        docComments.push(docComment);
+        // 保存当前文档注释内容。
+        docComment = {
+            type: token.content,
+            line: token.line,
+            col: token.col,
+            indent: token.indent,
+            content: reader.source.substring(token.pos, lastPos = reader.pos)
+        };
 
-        if (token && (token.content !== "///" && token.content !== "/**")) {
+        // 多读取 2 行文本，以便之后提取信息。
+        while (token = reader.readTo("///", "/**", "\n")) {
+
+            // 连续多个 /// 合并为一个注释。
+            if (token.content === "///" && docComment.type === "///") {
+                reader.readTo("\n");
+                docComment.content += "\n" + reader.source.substring(token.pos, lastPos = reader.pos);
+                continue;
+            }
+
+            // 继续读取一行。
+            if (token.content === "\n") {
+                token = reader.readTo("///", "/**", "\n");
+            }
+            break;
+        }
+
+        // 跳过当前换行。
+        if (token && token.content === "\n") {
             token = reader.readTo("///", "/**");
         }
 
-    }
+        // 解析剩余部分。
+        docComment.rest = reader.source.substring(lastPos + 1, (token || reader).pos);
+        docComment.contentParsed = (docComment.type === "///" ? docComment.content.replace(/^\s*\/\/\/\s*/gm, "") : docComment.content.substring("/**".length, docComment.content.length - "*/".length).replace(/^\s*\*\s*/mg, "")).trim();
+        docComment.tags = parseDocComment(docComment.contentParsed);
+        docComments.push(docComment);
 
-    for (var i = 0; i < docComments.length; i++) {
-        docComments[i].contentParsed = docComment.content.substring("/**".length, docComment.content.length - "*/".length).replace(/^\s*\*\s*/mg, "").trim();
-        docComments[i].tags = parseDocComment(docComments[i].contentParsed);
     }
 
     return docComments;
@@ -139,7 +140,7 @@ SourceReader.prototype = {
                     };
 
                     // 读取标记所在字符。
-                    while (this.pos < result.pos + content.length)
+                    while (this.pos < result.pos + content.length - 1)
                         this.read();
 
                     return result;
